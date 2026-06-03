@@ -1,6 +1,11 @@
 import streamlit as st
 import requests
 import io
+import json
+import os
+from groq import Groq
+from dotenv import load_dotenv
+load_dotenv()
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
@@ -384,7 +389,34 @@ def api_login(email, password):
     data = r.json()
     if r.status_code == 200:
         name = f"{data.get('first_name','')} {data.get('last_name','')}".strip() or data.get('user_name', email.split('@')[0])
-        return {"name": name, "email": data.get("email_id", email)}
+        user = {"name": name, "email": data.get("email_id", email)}
+
+        # Fetch this user's document history from Django after login
+        try:
+            csrf = st.session_state.http_session.cookies.get("csrftoken", "")
+            history_resp = st.session_state.http_session.get(
+                f"{BASE_URL}/api/documents/",
+                headers={"X-CSRFToken": csrf, "Referer": BASE_URL},
+            )
+            if history_resp.status_code == 200:
+                docs = history_resp.json()
+                doc_list = docs if isinstance(docs, list) else docs.get("results", [])
+                st.session_state.history = [
+                    {
+                        # Sarvesh's serializer uses original_name for the filename
+                        "file_name":    d.get("original_name") or d.get("file_name") or d.get("file", "Unknown"),
+                        "category":     "",
+                        "detail_level": "",
+                    }
+                    for d in doc_list
+                    if d.get("original_name") or d.get("file_name") or d.get("file")
+                ]
+        except Exception:
+            # If history fetch fails, just start with empty history
+            # Don't block login over this
+            st.session_state.history = []
+
+        return user
     raise ValueError(data.get("detail", "Login failed."))
 
 def api_signup(name, email, password, confirm):
@@ -404,23 +436,208 @@ def api_signup(name, email, password, confirm):
         messages.append(errors[0] if isinstance(errors, list) else str(errors))
     raise ValueError(" ".join(messages) or "Registration failed.")
 
+# ══════════════════════════════════════════════════════════════════════════════
+# GROQ AI SUMMARIZATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# Prompt templates per document type
+# Different domains need different instructions for the AI
+PROMPTS = {
+    "Sales": """You are an expert sales analyst. Analyse this sales document and extract actionable insights.
+Focus on: revenue figures, targets vs actuals, pipeline, customer data, growth opportunities.
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+{{"executive_summary": "3-4 sentence summary of the sales document", "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"], "action_items": ["action 1", "action 2", "action 3"], "data_highlights": ["key number or stat 1", "key number or stat 2", "key number or stat 3"]}}""",
+
+    "Education": """You are an expert academic analyst. Analyse this education document.
+Focus on: key concepts, learning objectives, skills mentioned, qualifications, achievements.
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+{{"executive_summary": "3-4 sentence summary of the education document", "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"], "action_items": ["action 1", "action 2", "action 3"], "data_highlights": ["key number or stat 1", "key number or stat 2", "key number or stat 3"]}}""",
+
+    "Technology": """You are an expert technology analyst. Analyse this technical document.
+Focus on: systems, architecture, tech stack, features, technical requirements, performance metrics.
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+{{"executive_summary": "3-4 sentence summary of the technical document", "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"], "action_items": ["action 1", "action 2", "action 3"], "data_highlights": ["key number or stat 1", "key number or stat 2", "key number or stat 3"]}}""",
+
+    "Healthcare": """You are an expert healthcare analyst. Analyse this medical or healthcare document.
+Focus on: diagnoses, treatments, patient data, clinical findings, recommendations, medical metrics.
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+{{"executive_summary": "3-4 sentence summary of the healthcare document", "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"], "action_items": ["action 1", "action 2", "action 3"], "data_highlights": ["key number or stat 1", "key number or stat 2", "key number or stat 3"]}}""",
+
+    "Legal": """You are an expert legal analyst. Analyse this legal document.
+Focus on: key clauses, obligations, rights, deadlines, parties involved, risks, compliance requirements.
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+{{"executive_summary": "3-4 sentence summary of the legal document", "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"], "action_items": ["action 1", "action 2", "action 3"], "data_highlights": ["key number or stat 1", "key number or stat 2", "key number or stat 3"]}}""",
+
+    "Finance": """You are an expert financial analyst. Analyse this financial document.
+Focus on: revenue, expenses, profit/loss, cash flow, financial ratios, budget vs actuals, forecasts.
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+{{"executive_summary": "3-4 sentence summary of the financial document", "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"], "action_items": ["action 1", "action 2", "action 3"], "data_highlights": ["key number or stat 1", "key number or stat 2", "key number or stat 3"]}}""",
+
+    "Operations": """You are an expert operations analyst. Analyse this operations document.
+Focus on: processes, efficiency metrics, bottlenecks, resources, timelines, KPIs, improvements.
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+{{"executive_summary": "3-4 sentence summary of the operations document", "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"], "action_items": ["action 1", "action 2", "action 3"], "data_highlights": ["key number or stat 1", "key number or stat 2", "key number or stat 3"]}}""",
+
+    "Marketing": """You are an expert marketing analyst. Analyse this marketing document.
+Focus on: campaigns, audience, channels, metrics, ROI, brand positioning, conversion rates.
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+{{"executive_summary": "3-4 sentence summary of the marketing document", "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"], "action_items": ["action 1", "action 2", "action 3"], "data_highlights": ["key number or stat 1", "key number or stat 2", "key number or stat 3"]}}""",
+
+    "Research": """You are an expert research analyst. Analyse this research document.
+Focus on: hypothesis, methodology, findings, conclusions, data sources, limitations, implications.
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+{{"executive_summary": "3-4 sentence summary of the research document", "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"], "action_items": ["action 1", "action 2", "action 3"], "data_highlights": ["key number or stat 1", "key number or stat 2", "key number or stat 3"]}}""",
+}
+
+DETAIL_INSTRUCTIONS = {
+    "Brief":       "Be concise. Keep each point to one short sentence.",
+    "Detailed":    "Be thorough. Include context and explanation for each point.",
+    "Bullet-only": "Use very short bullet points only. No full sentences.",
+}
+
+
+def build_prompt(parsed_text: str, category: str, detail_level: str, file_type: str) -> str:
+    """
+    Builds the final prompt to send to Groq.
+    Combines the category-specific instructions with the document text.
+    """
+    base_prompt = PROMPTS.get(category, PROMPTS["Research"])
+    detail_instruction = DETAIL_INSTRUCTIONS.get(detail_level, "")
+
+    # Truncate very long documents to avoid exceeding token limits
+    # Most LLMs have a limit on how much text they can process at once
+    max_chars = 12000
+    if len(parsed_text) > max_chars:
+        parsed_text = parsed_text[:max_chars] + "\n\n[Document truncated for length...]"
+
+    return f"""{base_prompt}
+
+Detail level instruction: {detail_instruction}
+File type: {file_type.upper()}
+
+Document content:
+{parsed_text}"""
+
+
+def call_groq(prompt: str) -> dict:
+    client = Groq(api_key=GROQ_API_KEY)
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a document analysis assistant. Always respond with valid JSON only. No markdown, no explanation, just the JSON object."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0.3,
+        max_tokens=1000,
+    )
+
+    raw = response.choices[0].message.content.strip()
+
+    # Strip markdown code blocks if present
+    if "```" in raw:
+        parts = raw.split("```")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:].strip()
+            if part.startswith("{"):
+                raw = part
+                break
+
+    # Extract just the JSON object
+    start = raw.find("{")
+    end   = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        raw = raw[start:end]
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Fallback — ask again with simpler prompt
+        fallback = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "Respond with valid JSON only. No extra text."},
+                {"role": "user", "content": f"Summarise this document into JSON with keys: executive_summary (string), key_points (array of 5 strings), action_items (array of 3 strings), data_highlights (array of 3 strings). Document: {prompt[:3000]}"}
+            ],
+            temperature=0.1,
+            max_tokens=800,
+        )
+        fb = fallback.choices[0].message.content.strip()
+        s = fb.find("{"); e = fb.rfind("}") + 1
+        return json.loads(fb[s:e])
+
+
 def api_summarize(file_name, category, detail_level, uploaded_file):
+    # ── Step 1: Upload file to Django for parsing ──
     csrf = st.session_state.http_session.cookies.get("csrftoken", "")
     uploaded_file.seek(0)
-    resp = st.session_state.http_session.post(f"{BASE_URL}/api/documents/upload/", files={"file": (uploaded_file.name, uploaded_file, "application/octet-stream")}, headers={"X-CSRFToken": csrf, "Referer": BASE_URL})
+    resp = st.session_state.http_session.post(
+        f"{BASE_URL}/api/documents/upload/",
+        files={"file": (uploaded_file.name, uploaded_file, "application/octet-stream")},
+        headers={"X-CSRFToken": csrf, "Referer": BASE_URL},
+    )
+    if resp.status_code == 403:
+        raise ValueError("Session expired. Please sign out and sign back in.")
+    if resp.status_code == 413:
+        raise ValueError("File is too large. Please upload a file under 200MB.")
     if resp.status_code != 201:
-        raise ValueError(resp.json().get("detail", "Upload failed."))
+        raise ValueError("File upload failed. Please check your connection and try again.")
     doc = resp.json()
     if doc.get("parse_status") == "failed":
-        raise ValueError(f"Parsing failed: {doc.get('parse_error','Unknown error')}")
-    lines = [l.strip() for l in doc.get("parsed_text","").splitlines() if l.strip()]
-    key_points = [l[:120] for l in lines if len(l) > 30][:5] or ["Document parsed successfully."]
+        raise ValueError("We could not read this file. Make sure it is not password-protected or corrupted.")
+
+    parsed_text = doc.get("parsed_text", "")
+    file_type   = doc.get("file_type", "unknown")
+    file_size   = doc.get("file_size", 0)
+    document_id = str(doc.get("document_id", ""))
+
+    if not parsed_text.strip():
+        raise ValueError("Document appears to be empty or could not be parsed.")
+
+    # ── Step 2: Send parsed text to Groq for AI summarization ──
+    prompt = build_prompt(parsed_text, category, detail_level, file_type)
+    
+    try:
+        ai_result = call_groq(prompt)
+    except json.JSONDecodeError:
+        raise ValueError("The AI returned an unexpected response. Please try again — this is usually temporary.")
+    except Exception as e:
+        err = str(e).lower()
+        if "rate limit" in err or "429" in err:
+            raise ValueError("Too many requests. Please wait a moment and try again.")
+        elif "api key" in err or "401" in err or "403" in err:
+            raise ValueError("Invalid Groq API key. Please check your .env file.")
+        elif "context" in err or "token" in err:
+            raise ValueError("Document is too long to process. Try a shorter document.")
+        else:
+            raise ValueError("AI summarization is temporarily unavailable. Please try again in a moment.")
+
+    # ── Step 3: Add file metadata to data highlights ──
+    data_highlights = ai_result.get("data_highlights", [])
+    data_highlights += [
+        f"File type: {file_type.upper()}",
+        f"File size: {round(file_size/1024, 1)} KB",
+        f"Doc ID: {document_id[:8]}...",
+    ]
+
     return {
-        "executive_summary": f"This {category.lower()} document was parsed and contains {len(lines)} lines of content. Analysis at '{detail_level}' depth. Full AI summarization available once Ollama is connected.",
-        "key_points": key_points,
-        "action_items": ["Review the parsed content for accuracy", "Connect Ollama to enable full AI summarization"],
-        "data_highlights": [f"Lines extracted: {len(lines)}", f"File type: {doc.get('file_type','unknown').upper()}", f"File size: {round(doc.get('file_size',0)/1024,1)} KB", f"Doc ID: {str(doc.get('document_id',''))[:8]}..."],
-        "category": category, "detail_level": detail_level, "file_name": file_name,
+        "executive_summary": ai_result.get("executive_summary", "Summary not available."),
+        "key_points":        ai_result.get("key_points", []),
+        "action_items":      ai_result.get("action_items", []),
+        "data_highlights":   data_highlights[:6],
+        "category":          category,
+        "detail_level":      detail_level,
+        "file_name":         file_name,
     }
 
 
@@ -473,9 +690,51 @@ def render_header(show_nav=True):
 # ══════════════════════════════════════════════════════════════════════════════
 def page_login():
     render_header(show_nav=False)
-    _, mid, _ = st.columns([1, 1.1, 1])
-    with mid:
-        st.markdown("<div style='height:52px'></div>", unsafe_allow_html=True)
+    th = THEMES[st.session_state.theme]
+
+    # Hero + form side by side
+    hero_col, _, form_col = st.columns([1.2, 0.2, 1])
+
+    with hero_col:
+        st.markdown(f"""
+        <div style="padding:80px 0 0 56px;">
+            <div style="font-size:11px;letter-spacing:2.5px;text-transform:uppercase;
+                color:{th['eyebrow']};margin-bottom:20px;font-weight:600;">
+                ◈ AI Document Intelligence
+            </div>
+            <div style="font-family:-apple-system,sans-serif;font-weight:800;font-size:48px;
+                line-height:1.05;letter-spacing:-2px;color:{th['hero_title']};margin-bottom:20px;">
+                Turn documents<br>into <span style="color:{th['hero_accent']}">insight</span>
+            </div>
+            <div style="font-size:15px;line-height:1.7;color:{th['hero_sub']};max-width:400px;margin-bottom:40px;">
+                Upload any PDF, Word doc, CSV, or text file and get a structured
+                AI-generated summary tailored to your domain — in seconds.
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;max-width:320px;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:32px;height:32px;border-radius:8px;background:{th['accent_bg']};
+                        border:1px solid {th['accent_brd']};display:flex;align-items:center;
+                        justify-content:center;font-size:14px;">◈</div>
+                    <span style="font-size:14px;color:{th['muted']};">Domain-aware AI summarization</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:32px;height:32px;border-radius:8px;background:{th['accent_bg']};
+                        border:1px solid {th['accent_brd']};display:flex;align-items:center;
+                        justify-content:center;font-size:14px;">◈</div>
+                    <span style="font-size:14px;color:{th['muted']};">PDF, DOCX, CSV and TXT support</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:32px;height:32px;border-radius:8px;background:{th['accent_bg']};
+                        border:1px solid {th['accent_brd']};display:flex;align-items:center;
+                        justify-content:center;font-size:14px;">◈</div>
+                    <span style="font-size:14px;color:{th['muted']};">Downloadable PDF report</span>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with form_col:
+        st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
         st.markdown('<div class="auth-card"><div class="auth-title">Welcome back</div><div class="auth-sub">Sign in to access your documents and summaries.</div></div>', unsafe_allow_html=True)
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         if st.session_state.auth_error:
@@ -539,7 +798,17 @@ def page_dashboard():
     history = st.session_state.history
     cats = list(set(h["category"] for h in history)) if history else []
     s1, s2, s3, s4 = st.columns(4)
-    stats = [(str(len(history)),"Documents Analysed"),(str(len(cats)),"Domains Used"),(history[-1]["category"] if history else "—","Last Domain"),(history[-1]["file_name"][:14]+"…" if history and len(history[-1]["file_name"])>14 else (history[-1]["file_name"] if history else "—"),"Last File")]
+    # Only count categories from docs that actually have one
+    cats_with_data = list(set(h["category"] for h in history if h.get("category")))
+    last_domain    = history[-1]["category"] if history and history[-1].get("category") else "—"
+    last_file_raw  = history[-1]["file_name"] if history else "—"
+    last_file      = last_file_raw[:14] + "…" if len(last_file_raw) > 14 else last_file_raw
+    stats = [
+        (str(len(history)),         "Documents Analysed"),
+        (str(len(cats_with_data)),  "Domains Used"),
+        (last_domain,               "Last Domain"),
+        (last_file,                 "Last File"),
+    ]
     for col,(num,label) in zip([s1,s2,s3,s4],stats):
         with col:
             st.markdown(f'<div class="stat-card" style="margin:0 8px;"><div class="stat-number">{num}</div><div class="stat-label">{label}</div></div>', unsafe_allow_html=True)
@@ -555,7 +824,9 @@ def page_dashboard():
             st.markdown('<div class="empty-state"><div class="empty-icon">◈</div><div class="empty-title">No documents yet</div><div class="empty-sub">Head to the Analyser to process your first document</div></div>', unsafe_allow_html=True)
         else:
             for item in reversed(history[-8:]):
-                st.markdown(f'<div class="history-row"><div><div class="history-filename">{item["file_name"]}</div><div class="history-meta">{item["detail_level"]} summary</div></div><div class="history-badge">{item["category"]}</div></div>', unsafe_allow_html=True)
+                badge = f'<div class="history-badge">{item["category"]}</div>' if item.get("category") else ""
+                meta  = f'{item["detail_level"]} summary' if item.get("detail_level") else "Previously uploaded"
+                st.markdown(f'<div class="history-row"><div><div class="history-filename">{item["file_name"]}</div><div class="history-meta">{meta}</div></div>{badge}</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     with a_col:
