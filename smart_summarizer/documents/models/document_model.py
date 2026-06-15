@@ -28,7 +28,8 @@ class Document(models.Model):
     )
 
     # WHAT was uploaded
-    document_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    document_id = models.BigAutoField(primary_key=True)
+    id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     original_name = models.CharField(max_length=255, help_text="Original filename the user uploaded.")
     file = models.FileField(upload_to=user_document_path)
     file_type = models.CharField(max_length=20, blank=True, help_text="Detected type: pdf, docx, csv, etc.")

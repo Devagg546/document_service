@@ -4,6 +4,13 @@ Parser Service
 
 import json
 import os
+import fitz  # PyMuPDF
+import pandas as pd
+import chardet
+from lxml import etree
+from lxml import html
+from docx import Document as DocxDocument
+
 
 
 # 1. Figure out what type of file this is
@@ -42,7 +49,6 @@ def detect_file_type(filename):
 
 def parse_pdf(file_path):
     """Extract text from a PDF using PyMuPDF (fitz)."""
-    import fitz  # PyMuPDF
 
     text_parts = []
     with fitz.open(file_path) as doc:
@@ -56,7 +62,6 @@ def parse_pdf(file_path):
 
 def parse_docx(file_path):
     """Extract text from a DOCX file using python-docx."""
-    from docx import Document as DocxDocument
 
     doc = DocxDocument(file_path)
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -65,7 +70,6 @@ def parse_docx(file_path):
 
 def parse_xlsx(file_path):
     """Extract text from an Excel file using pandas."""
-    import pandas as pd
 
     text_parts = []
     # Read all sheets
@@ -81,7 +85,6 @@ def parse_xlsx(file_path):
 
 def parse_csv(file_path):
     """Extract text from a CSV file using pandas."""
-    import pandas as pd
 
     df = pd.read_csv(file_path, dtype=str)
     df = df.fillna("")
@@ -91,7 +94,6 @@ def parse_csv(file_path):
 
 def parse_txt(file_path):
     """Read a plain text file. Handles encoding detection."""
-    import chardet
 
     # First, detect the encoding
     with open(file_path, "rb") as f:
@@ -114,7 +116,6 @@ def parse_json(file_path):
 
 def parse_xml(file_path):
     """Extract all text content from an XML file using lxml."""
-    from lxml import etree
 
     tree = etree.parse(file_path)
     # Get all text nodes, join them
@@ -130,7 +131,6 @@ def parse_xml(file_path):
 
 def parse_html(file_path):
     """Extract visible text from an HTML file using lxml."""
-    from lxml import html
 
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()

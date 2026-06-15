@@ -8,18 +8,18 @@ from documents.views import (
 )
 
 urlpatterns = [
-    # Upload a file
+    # Upload file(s)
     path("documents/upload/", DocumentUploadView.as_view(), name="document-upload"),
 
     # List my documents (history)
     path("documents/", DocumentListView.as_view(), name="document-list"),
 
     # View a single document
-    path("documents/<document_id>/", DocumentDetailView.as_view(), name="document-detail"),
+    path("documents/<int:document_id>/", DocumentDetailView.as_view(), name="document-detail"),
 
     # Delete a document
-    path("documents/<document_id>/delete/", DocumentDeleteView.as_view(), name="document-delete"),
+    path("documents/<int:document_id>/delete/", DocumentDeleteView.as_view(), name="document-delete"),
 
     # Re-parse a document
-    path("documents/<document_id>/reparse/", DocumentReparseView.as_view(), name="document-reparse"),
+    path("documents/<int:document_id>/reparse/", DocumentReparseView.as_view(), name="document-reparse"),
 ]

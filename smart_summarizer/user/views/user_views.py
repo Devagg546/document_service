@@ -4,6 +4,7 @@ Handles user registration, login, logout, and basic user management.
 """
 
 from django.contrib.auth import login, logout
+from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets, filters
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -43,6 +44,7 @@ class RegisterView(CreateAPIView):
 
 # Login — email + password
 
+@extend_schema(request=LoginSerializer, responses={200: UserResponseSerializer})
 class LoginView(APIView):
     """
     Anyone can login with registered credentials
@@ -81,6 +83,7 @@ class LoginView(APIView):
 
 # Logout — clears the session
 
+@extend_schema(request=None, responses={200: None})
 class LogoutView(APIView):
     """
     Clears the session cookie. User will need to login again.

@@ -10,45 +10,38 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from documents.models import Document
 from documents.constants import PENDING
 from documents.serializers import (
+    BulkUploadResultSerializer,
     DocumentDetailSerializer,
     DocumentListSerializer,
     DocumentUploadSerializer,
 )
-from documents.services import handle_upload, run_parser
+from documents.services.document_upload_service import handle_bulk_upload, run_parser
 
 
+# Upload file(s)
 
-# Upload a file
 @extend_schema(
     request={'multipart/form-data': DocumentUploadSerializer},
-    responses={201: DocumentDetailSerializer},
+    responses={201: BulkUploadResultSerializer(many=True)},
 )
 class DocumentUploadView(APIView):
     """
-    Upload a file in any supported format.
-    The file is saved, parsed, and the result is returned.
+    Upload one or more files in any supported format.
+    Each file is saved, parsed, and the per-file results are returned.
     """
     permission_classes = [IsAuthenticated]
-
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
-        # Validate that a file was sent
         serializer = DocumentUploadSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        uploaded_file = serializer.validated_data["file"]
+        files = serializer.validated_data["files"]
+        results = handle_bulk_upload(user=request.user, files=files)
 
-        try:
-            # The upload service handles everything:
-            # validate → save → parse → update status
-            document = handle_upload(user=request.user, uploaded_file=uploaded_file)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Return the full document details
-        response_serializer = DocumentDetailSerializer(document, context={"request": request})
-
+        response_serializer = BulkUploadResultSerializer(
+            results, many=True, context={"request": request}
+        )
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -83,7 +76,6 @@ class DocumentListView(ListAPIView):
 
 # View a single document (with parsed text)
 
-
 class DocumentDetailView(RetrieveAPIView):
     """
     View full details of a single document, including the parsed text.
@@ -98,7 +90,6 @@ class DocumentDetailView(RetrieveAPIView):
 
 
 # Delete a document
-
 
 class DocumentDeleteView(DestroyAPIView):
     """
@@ -132,7 +123,6 @@ class DocumentDeleteView(DestroyAPIView):
 
 
 # Re-parse an existing document
-
 
 class DocumentReparseView(APIView):
     """

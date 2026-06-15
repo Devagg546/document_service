@@ -10,8 +10,8 @@ class User(models.Model):
     Users log in with email and password.
     """
 
-    id = models.BigAutoField(primary_key=True)
-    user_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    user_id = models.BigAutoField(primary_key=True)
+    id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     user_name = models.CharField(max_length=50, unique=True)
     first_name = models.CharField(max_length=50)
     last_name = models.CharField(max_length=50)
@@ -30,7 +30,6 @@ class User(models.Model):
 
     def __str__(self):
         return self.user_name
-
 
     @property
     def is_authenticated(self):

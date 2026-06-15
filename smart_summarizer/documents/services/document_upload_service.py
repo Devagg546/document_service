@@ -71,6 +71,32 @@ def handle_upload(user, uploaded_file):
     return document
 
 
+def handle_bulk_upload(user, files):
+    """
+    Process multiple files in one request.
+    Returns a list of per-file result dicts:
+        {"filename": str, "success": bool, "error": str|None, "document": Document|None}
+    """
+    results = []
+    for uploaded_file in files:
+        try:
+            document = handle_upload(user, uploaded_file)
+            results.append({
+                "filename": uploaded_file.name,
+                "success": True,
+                "error": None,
+                "document": document,
+            })
+        except (ValueError, Exception) as e:
+            results.append({
+                "filename": uploaded_file.name,
+                "success": False,
+                "error": str(e),
+                "document": None,
+            })
+    return results
+
+
 def run_parser(document):
     """
     Run  parser on document.

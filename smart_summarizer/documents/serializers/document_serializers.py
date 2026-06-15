@@ -4,10 +4,14 @@ from documents.models import Document
 
 class DocumentUploadSerializer(serializers.Serializer):
     """
-    Validates the incoming file upload.
-    Just the file field — everything else is handled by the upload service.
+    Validates multi-file upload.
+    Accepts one or more files under the 'files' key.
     """
-    file = serializers.FileField(help_text="The file to upload (PDF, DOCX, XLSX, CSV, TXT, JSON, XML, HTML).")
+    files = serializers.ListField(
+        child=serializers.FileField(),
+        allow_empty=False,
+        help_text="One or more files to upload (PDF, DOCX, XLSX, CSV, TXT, JSON, XML, HTML).",
+    )
 
 
 class DocumentListSerializer(serializers.ModelSerializer):
@@ -21,6 +25,7 @@ class DocumentListSerializer(serializers.ModelSerializer):
         model = Document
         fields = [
             "document_id",
+            "id",
             "original_name",
             "file_type",
             "file_size",
@@ -43,6 +48,7 @@ class DocumentDetailSerializer(serializers.ModelSerializer):
         model = Document
         fields = [
             "document_id",
+            "id",
             "original_name",
             "file",
             "file_url",
@@ -63,3 +69,15 @@ class DocumentDetailSerializer(serializers.ModelSerializer):
         if obj.file and request:
             return request.build_absolute_uri(obj.file.url)
         return None
+
+
+class BulkUploadResultSerializer(serializers.Serializer):
+    """
+    Per-file result in a bulk upload response.
+    On success: document data is populated, error is null.
+    On failure: document is null, error has the message.
+    """
+    filename = serializers.CharField()
+    success = serializers.BooleanField()
+    error = serializers.CharField(allow_null=True)
+    document = DocumentDetailSerializer(allow_null=True)

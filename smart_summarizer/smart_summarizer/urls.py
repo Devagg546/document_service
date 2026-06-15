@@ -13,30 +13,34 @@ from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
     SpectacularRedocView,
-    )
+)
+
 urlpatterns = [
     # Admin
     path('admin/', admin.site.urls),
-       
-    # OpenAPI / Swagger/ reDocs  
-    path('api/schema/',SpectacularAPIView.as_view(),name='schema',),
-    path('api/docs/',SpectacularSwaggerView.as_view(url_name='schema'),name='swagger-ui',),
-    path('api/redoc/',SpectacularRedocView.as_view(url_name='schema'),name='redoc',),
 
+    # OpenAPI / Swagger / reDocs
+    path('schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 
-    # User Auth 
-    path('api/users/register/', RegisterView.as_view(), name='user-register'),
-    path('api/users/login/', LoginView.as_view(), name='user-login'),
-    path('api/users/logout/', LogoutView.as_view(), name='user-logout'),
+    # User Auth
+    path('users/register/', RegisterView.as_view(), name='user-register'),
+    path('users/login/', LoginView.as_view(), name='user-login'),
+    path('users/logout/', LogoutView.as_view(), name='user-logout'),
 
-    # User CRUD 
-    path('api/users/', UserViewSet.as_view({'get': 'list', 'post': 'create'}), name='user-list'),
-    path('api/users/<user_id>/', UserViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='user-detail'),
+    # User CRUD — each action gets its own descriptive URL
+    path('users/', UserViewSet.as_view({'get': 'list'}), name='user-list'),
+    path('users/create/', UserViewSet.as_view({'post': 'create'}), name='user-create'),
+    path('users/<int:user_id>/', UserViewSet.as_view({'get': 'retrieve'}), name='user-detail'),
+    path('users/update/<int:user_id>/', UserViewSet.as_view({'put': 'update'}), name='user-update'),
+    path('users/partial-update/<int:user_id>/', UserViewSet.as_view({'patch': 'partial_update'}), name='user-partial-update'),
+    path('users/delete/<int:user_id>/', UserViewSet.as_view({'delete': 'destroy'}), name='user-delete'),
 
-    # Document endpoints 
-    path('api/documents/upload/', DocumentUploadView.as_view(), name='document-upload'),
-    path('api/documents/', DocumentListView.as_view(), name='document-list'),
-    path('api/documents/<document_id>/', DocumentDetailView.as_view(), name='document-detail'),
-    path('api/documents/<document_id>/delete/', DocumentDeleteView.as_view(), name='document-delete'),
-    path('api/documents/<document_id>/reparse/', DocumentReparseView.as_view(), name='document-reparse'),
+    # Document endpoints
+    path('documents/upload/', DocumentUploadView.as_view(), name='document-upload'),
+    path('documents/', DocumentListView.as_view(), name='document-list'),
+    path('documents/<int:document_id>/', DocumentDetailView.as_view(), name='document-detail'),
+    path('documents/<int:document_id>/delete/', DocumentDeleteView.as_view(), name='document-delete'),
+    path('documents/<int:document_id>/reparse/', DocumentReparseView.as_view(), name='document-reparse'),
 ]

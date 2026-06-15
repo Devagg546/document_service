@@ -1,4 +1,17 @@
+from rest_framework.authentication import SessionAuthentication
 from user.models import User
+
+
+class CsrfExemptSessionAuthentication(SessionAuthentication):
+    """
+    Session auth without CSRF enforcement.
+    DRF's default SessionAuthentication runs Django's CSRF check on every
+    POST/PUT/DELETE, which breaks Swagger and non-browser API clients.
+    This skips that check while still using session cookies for identity.
+    """
+
+    def enforce_csrf(self, request):
+        return  # skip CSRF check
 
 
 class EmailBackend:
