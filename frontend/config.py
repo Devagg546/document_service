@@ -8,7 +8,7 @@ load_dotenv()
 # ── Backend ────────────────────────────────────────────────────────────────────
 # The URL where Sarvesh's Django server is running
 # Change this to the real server URL when deploying
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "https://doclens-backend-wix2.onrender.com"
 
 # ── AI ─────────────────────────────────────────────────────────────────────────
 # Groq API key — loaded from .env file, never hardcoded
